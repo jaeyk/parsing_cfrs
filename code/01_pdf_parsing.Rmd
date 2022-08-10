@@ -1,0 +1,109 @@
+---
+title: "PDF Parsing"
+author: "Jae Yeon Kim"
+output:
+  html_document:
+    df_print: paged
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+# Import PDF files 
+
+```{r}
+# import pkgs 
+if(!require(pacman)) install.packages("pacman")
+
+pacman::p_load(tesseract, magick, zoo, parallel, pdftools, naniar, tidyverse, here, glue, purrr, 
+               spacyr) # for setup, see https://cran.r-project.org/web/packages/spacyr/vignettes/using_spacyr.html
+
+# check files 
+list.files(here("raw_data"))
+
+# import pdf files 
+df <- pdftools::pdf_text(here("raw_data", "2021-001463-1Stevens-RD-FAR Case 95-029-RR.pdf")) # the largest file (in terms of size)
+```
+
+# Parse PDF files 
+
+1. Select the pages  
+
+```{r}
+# page numbers 
+page_ns <- str_which(tolower(df), "response number")
+
+length(page_ns) # the number of pages
+
+# index by page numbers
+p1 <- df[page_ns[1]]
+```
+
+2. Construct a dataframe base don the lines 
+
+```{r}
+lines <- p1 %>%
+  str_split("\n\n") %>%
+  unlist()
+  
+trimmed_df <- lines %>% 
+  str_trim() %>%
+  str_split_fixed("\\s{2,}", # at least 2 spaces away 
+                    4) %>% # 4 columns 
+  as_tibble() # turn into tibble (tidy version of dataframe)
+```
+
+3. Clean the dataframe 
+
+```{r}
+# remove "\n" from the fourth column
+trimmed_df$V4 <- str_replace_all(trimmed_df$V4, "\n", "") 
+
+# replace col names with the row 1 
+colnames(trimmed_df) <- trimmed_df[1,]
+
+# remove the row 1 
+trimmed_df <- trimmed_df[-1,] 
+```
+
+4. Write a function that automates this loop 
+
+```{r}
+lines2df <- function(i) {
+  
+  # index by page numbers
+  p <- df[page_ns[i]]
+  
+  # make lines 
+  lines <- p %>%
+  str_split("\n\n") %>%
+  unlist()
+  
+  # lines to dataframe 
+  trimmed_df <- lines %>% 
+    str_trim() %>%
+    str_split_fixed("\\s{2,}", # at least 2 spaces away 
+                      4) %>% # 4 columns 
+    as_tibble() # turn into tibble (tidy version of dataframe)
+ 
+  # remove "\n" from the fourth column
+  trimmed_df$V4 <- str_replace_all(trimmed_df$V4, "\n", "") 
+  # replace col names with the row 1  
+  colnames(trimmed_df) <- trimmed_df[1,]
+
+  # remove the row 1 
+  trimmed_df <- trimmed_df[-1,]
+  
+  return(trimmed_df)
+}
+```
+
+5. Apply to the other pages
+
+```{r}
+out <- purrr::map_dfr(seq(page_ns), lines2df)
+
+write_csv(out, here("outputs", "2021-001463-1Stevens-RD-FAR Case 95-029-RR.csv"))
+```
